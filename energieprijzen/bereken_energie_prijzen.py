@@ -1,8 +1,20 @@
+from importlib.resources import path
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import argparse
 
+def read_supplier_costs(supplier_name: str) -> float:
+    base = Path(__file__).resolve().parents[1]
+    src_dir = base / 'energieprijzen'
+    suppliers = src_dir / 'leveranciers.csv'
+    if not suppliers.exists():
+        raise FileNotFoundError('Expected source CSVs not found')
+    return float(
+        pd.read_csv(suppliers, sep=';', index_col=0).loc[supplier_name, 'verkoopprijs']
+        .replace('€', '').strip()
+        .replace(',', '.')
+    )
 
 def read_prices(path: Path, start=None, end=None) -> pd.DataFrame:
     df = pd.read_csv(
@@ -19,6 +31,18 @@ def read_prices(path: Path, start=None, end=None) -> pd.DataFrame:
         df = df[df['datum_nl'] < pd.to_datetime(end)]
     return df
 
+def read_prices_jeroen(start=None, end=None) -> pd.DataFrame:
+    base = Path(__file__).resolve().parents[1]
+    src_dir = base / 'energieprijzen'
+    file_2025 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2025.csv'
+    file_2026 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2026.csv'
+    if not file_2025.exists() or not file_2026.exists():
+        raise FileNotFoundError('Expected source CSVs not found')
+
+    df1 = read_prices(file_2025, start=start)
+    df2 = read_prices(file_2026, end=end)
+    df = pd.concat([df1, df2], ignore_index=True)
+    return df
 
 def build_daily_rows(df: pd.DataFrame, taxrate: float, energy_tax: float, supplier_costs: float) -> pd.DataFrame:
     df = df.sort_values('datum_nl').copy()
@@ -41,7 +65,7 @@ def build_daily_rows(df: pd.DataFrame, taxrate: float, energy_tax: float, suppli
         average = nums.mean()
         maximum = nums.max()
 
-        row = [pd.to_datetime(date).date()] + prices + [total, minimum, average, maximum]
+        row = [pd.to_datetime(date).date()] + nums.tolist() + [total, minimum, average, maximum]
         rows.append(row)
 
     times = [(pd.Timestamp('2025-01-01') + pd.Timedelta(minutes=15*i)).strftime('%H:%M') for i in range(96)]
@@ -67,31 +91,15 @@ def main():
     TAXRATE = 1.21;  # 21% tax rate
     ENERGY_TAX = 0.11;  # Energy tax in euros per kWh
     
-
-    base = Path(__file__).resolve().parents[1]
-    src_dir = base / 'data_raw'
-    out_dir = base / 'data_processed'
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    file_2025 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2025.csv'
-    file_2026 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2026.csv'
-    suppliers = src_dir / 'leveranciers.csv'
-    print(f'Looking for source CSVs in {src_dir}')  
-
-    if not file_2025.exists() or not file_2026.exists() or not suppliers.exists():
-        raise FileNotFoundError('Expected source CSVs not found in data/')
-
-    df1 = read_prices(file_2025, start=START_DATE)
-    df2 = read_prices(file_2026, end=END_DATE)
-    SUPPLIER_COSTS = float(
-        pd.read_csv(suppliers, sep=';', index_col=0).loc[SUPPLIER, 'verkoopprijs']
-        .replace('€', '').strip()
-        .replace(',', '.')
-        )
-
-    df = pd.concat([df1, df2], ignore_index=True)
+    SUPPLIER_COSTS = read_supplier_costs(SUPPLIER);
+    
+    df = read_prices_jeroen(start=START_DATE, end=END_DATE);
 
     out = build_daily_rows(df, TAXRATE, ENERGY_TAX, SUPPLIER_COSTS)
+
+    base = Path(__file__).resolve().parents[1]
+    out_dir = base / 'data_processed'
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     out_path = out_dir / 'energie_prijzen_2025Q3_2026Q2.csv'
     out.to_csv(out_path, index=False, float_format='%.6f', header=True)
