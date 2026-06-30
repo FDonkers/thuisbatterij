@@ -4,6 +4,16 @@ import pandas as pd
 import numpy as np
 import argparse
 
+TAXRATE = 1.21;  # 21% tax rate
+ENERGY_TAX = 0.11;  # Energy tax in euros per kWh
+BASE = Path(__file__).resolve().parents[1]
+SRC_DIR = BASE / 'energieprijzen'
+INFILE_2025 = SRC_DIR / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2025.csv'
+INFILE_2026 = SRC_DIR / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2026.csv'
+OUT_DIR = BASE / 'energieprijzen'
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTFILE = OUT_DIR / 'jeroen_punt_nl_dynamische_stroomprijzen_2025Q3_2026Q2.csv'
+
 def read_supplier_costs(supplier_name: str) -> float:
     base = Path(__file__).resolve().parents[1]
     src_dir = base / 'energieprijzen'
@@ -32,15 +42,11 @@ def read_prices(path: Path, start=None, end=None) -> pd.DataFrame:
     return df
 
 def read_prices_jeroen(start=None, end=None) -> pd.DataFrame:
-    base = Path(__file__).resolve().parents[1]
-    src_dir = base / 'energieprijzen'
-    file_2025 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2025.csv'
-    file_2026 = src_dir / 'jeroen_punt_nl_dynamische_stroomprijzen_jaar_2026.csv'
-    if not file_2025.exists() or not file_2026.exists():
+    if not INFILE_2025.exists() or not INFILE_2026.exists():
         raise FileNotFoundError('Expected source CSVs not found')
 
-    df1 = read_prices(file_2025, start=start)
-    df2 = read_prices(file_2026, end=end)
+    df1 = read_prices(INFILE_2025, start=start)
+    df2 = read_prices(INFILE_2026, end=end)
     df = pd.concat([df1, df2], ignore_index=True)
     return df
 
@@ -84,26 +90,15 @@ def main():
                         help='Energy supplier name (default: GreenChoice)')
     
     args = parser.parse_args()
-    
     START_DATE = args.start_date
     END_DATE = args.end_date
     SUPPLIER = args.supplier
-    TAXRATE = 1.21;  # 21% tax rate
-    ENERGY_TAX = 0.11;  # Energy tax in euros per kWh
-    
+
     SUPPLIER_COSTS = read_supplier_costs(SUPPLIER);
-    
     df = read_prices_jeroen(start=START_DATE, end=END_DATE);
-
     out = build_daily_rows(df, TAXRATE, ENERGY_TAX, SUPPLIER_COSTS)
-
-    base = Path(__file__).resolve().parents[1]
-    out_dir = base / 'data_processed'
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    out_path = out_dir / 'energie_prijzen_2025Q3_2026Q2.csv'
-    out.to_csv(out_path, index=False, float_format='%.6f', header=True)
-    print(f'Wrote {out_path}')
+    out.to_csv(OUTFILE, index=False, float_format='%.6f', header=True)
+    print(f'Wrote {OUTFILE}')
 
 if __name__ == '__main__':
     main()
