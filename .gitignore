@@ -1,3 +1,4 @@
 /prompts
 /tmp
 .DS_Store
+*.csv
