@@ -97,7 +97,7 @@ def build_daily_rows(df: pd.DataFrame, taxrate: float, energy_tax: float, suppli
         rows.append(row)
 
     times = [(pd.Timestamp('2025-01-01') + pd.Timedelta(minutes=15*i)).strftime('%H:%M') for i in range(96)]
-    cols = ['date'] + times + ['total', 'min', 'avg', 'max']
+    cols = ['date'] + times + ['total', 'minimum', 'average', 'maximum']
     out = pd.DataFrame(rows, columns=cols)
     return out
 

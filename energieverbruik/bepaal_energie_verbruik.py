@@ -1,53 +1,77 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import time
 import pandas as pd
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-OUTPUT_CSV = BASE_DIR / "results" / "energie_verbruik_2025Q3_2026Q2.csv"
-INPUT_FILES = [
-    BASE_DIR / "data" / "jeroen_punt_nl_dynamische_stroomprijzen_jaar_2025.csv",
-    BASE_DIR / "data" / "jeroen_punt_nl_dynamische_stroomprijzen_jaar_2026.csv",
-]
-
+OUTPUT_CSV = BASE_DIR / "energieverbruik" / "energie_verbruik_2025Q3_2026Q2.csv"
+INPUT_CSV = BASE_DIR / "energieverbruik" / "P1e-2025-7-1-2026-7-1.csv"
+START_DATE = pd.Timestamp("2025-07-01 00:00:00")
+END_DATE = pd.Timestamp("2026-06-30 23:59:59")
 
 def format_value(value: float) -> str:
     return f"{value:.6f}"
 
-
 def read_source_csv(path: Path) -> pd.DataFrame:
-    columns = ["datum_nl", "datum_utc", "prijs_excl_belastingen"]
+    columns = [
+        "datum_nl", 
+        "Import T1 kWh", 
+        "Import T2 kWh", 
+        "Export T1 kWh", 
+        "Export T2 kWh", 
+        "L1 max W", 
+        "L2 max W", 
+        "L3 max W"
+        ]
     df = pd.read_csv(
         path,
-        sep=";",
-        decimal=",",
+        sep=",",
+        decimal=".",
         skiprows=1,
         header=None,
         names=columns,
         encoding="utf-8",
     )
 
-    df["datum_nl"] = pd.to_datetime(df["datum_nl"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
-    df["datum_utc"] = pd.to_datetime(df["datum_utc"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
-    df["prijs_excl_belastingen"] = pd.to_numeric(df["prijs_excl_belastingen"], errors="coerce")
+    # drop unnecessary columns
+    df = df.drop(["L1 max W","L2 max W","L3 max W"], axis=1)
 
-    return df.dropna(subset=["datum_nl", "prijs_excl_belastingen"]).copy()
+    # filter on date range
+    df["datum_nl"] = pd.to_datetime(df["datum_nl"], format="%Y-%m-%d %H:%M", errors="coerce")
+    df = df[df["datum_nl"] >= START_DATE].copy()
+    df = df[df["datum_nl"] <= END_DATE].copy()
+    df = df.sort_values("datum_nl").reset_index(drop=True)
+
+    # calculate energy usage per 15-minute interval from cumulative meter readings
+    df["total_import_kWh"] = df["Import T1 kWh"] + df["Import T2 kWh"]
+    df["total_export_kWh"] = df["Export T1 kWh"] + df["Export T2 kWh"]
+    df["energy_usage_kWh_per_15m"] = (
+        df["total_import_kWh"].diff().fillna(0.0)
+        - df["total_export_kWh"].diff().fillna(0.0)
+    )
+
+    # drop unnecessary columns
+    df = df.drop(["Import T1 kWh","Import T2 kWh"], axis=1)
+    df = df.drop(["Export T1 kWh","Export T2 kWh"], axis=1)
+    return df
 
 
 def main() -> None:
     frames = []
-    for input_csv in INPUT_FILES:
-        if not input_csv.exists():
-            raise FileNotFoundError(f"Input file not found: {input_csv}")
-        frames.append(read_source_csv(input_csv))
+    if not INPUT_CSV.exists():
+        raise FileNotFoundError(f"Input file not found: {INPUT_CSV}")
+    frames.append(read_source_csv(INPUT_CSV))
 
     df = pd.concat(frames, ignore_index=True)
-    df = df[df["datum_nl"] >= pd.Timestamp("2025-07-01 00:00:00")].copy()
-    df = df[df["datum_nl"] < pd.Timestamp("2026-06-01 00:00:00")].copy()
-    df = df.sort_values("datum_nl").reset_index(drop=True)
 
     if df.empty:
         raise ValueError("No data found for the requested period")
+    
+    
+    print(df.head(5))
+    print(".....")
+    print(df.tail(5))
 
     time_slots = [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 15, 30, 45)]
     header = ["date", *time_slots, "total", "minimum", "average", "maximum"]
@@ -55,7 +79,7 @@ def main() -> None:
     rows = []
     for day, day_df in df.groupby(df["datum_nl"].dt.normalize()):
         ordered = day_df.sort_values("datum_nl")
-        values = ordered["prijs_excl_belastingen"].tolist()
+        values = ordered["energy_usage_kWh_per_15m"].tolist()
         if len(values) != len(time_slots):
             values = values[: len(time_slots)]
             if len(values) < len(time_slots):
